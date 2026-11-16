@@ -1,5 +1,5 @@
 # Dogfood: Cilytics for the flisk-sh org, published to GitHub Pages from the cilytics-data branch
-# (https://flisk-sh.github.io/cilytics/). Uses the action from this checkout, so a PR here is tested before it ships.
+# (https://cilytics.flisk.si/). Uses the action from this checkout, so a PR here is tested before it ships.
 name: Cilytics (flisk-sh)
 on:
   schedule:
@@ -35,6 +35,7 @@ jobs:
       - uses: ./
         with:
           org: flisk-sh
+          cname: cilytics.flisk.si
           scores-file: scores.json
           scores-repo: flisk-sh/flisk
           scores-url: https://github.com/flisk-sh/flisk/blob/main/scripts/scores/{id}.mjs

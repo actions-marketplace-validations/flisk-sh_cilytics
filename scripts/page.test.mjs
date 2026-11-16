@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const canonicalUrl = "https://flisk-sh.github.io/cilytics/";
+const canonicalUrl = "https://cilytics.flisk.si/";
 const html = readFileSync(new URL("../site/index.html", import.meta.url), "utf8");
 const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? "";
 const activeTags = head.replace(/<!--[\s\S]*?-->/g, "");

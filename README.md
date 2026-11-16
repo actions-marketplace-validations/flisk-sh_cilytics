@@ -2,7 +2,7 @@
 
 Hourly CI health for any GitHub org or user: which workflows are red, flaky or slow, per-repo pass rate, [GEL](https://github.com/flisk-sh/gel) guard results and AI-SDLC flags. It reads the GitHub API only. No model, no account, no server: a GitHub Action writes a snapshot to a branch of your own repository and GitHub Pages serves it.
 
-Live example, for the flisk-sh org: https://flisk-sh.github.io/cilytics/
+Live example, for the flisk-sh org: https://cilytics.flisk.si/
 
 ## Run it on your org
 
@@ -29,7 +29,7 @@ jobs:
           org: your-org-or-username # optional, defaults to this repo's owner
 ```
 
-Each run replaces `data.json`, `history.json` and `index.html` on the `cilytics-data` branch with one new commit. Turn on GitHub Pages for that branch (Settings, Pages, Deploy from a branch) and the page is at `https://<owner>.github.io/<repo>/`. Any hosted copy of the page can also show your data with `?src=owner/repo[@branch]`, for example `https://flisk-sh.github.io/cilytics/?src=your-org/ci-dashboard`.
+Each run replaces `data.json`, `history.json` and `index.html` on the `cilytics-data` branch with one new commit. Turn on GitHub Pages for that branch (Settings, Pages, Deploy from a branch) and the page is at `https://<owner>.github.io/<repo>/`. Any hosted copy of the page can also show your data with `?src=owner/repo[@branch]`, for example `https://cilytics.flisk.si/?src=your-org/ci-dashboard`.
 
 Pin the action to a commit SHA. The default token reads public repos only; pass a token with `repo` read access to include private repos.
 
@@ -44,6 +44,7 @@ Pin the action to a commit SHA. The default token reads public repos only; pass 
 | `scores-file` | none | JSON array of scorer rows to show as a Scoreboard |
 | `scores-repo` | none | `owner/repo` the scores come from, shown beside the board |
 | `scores-url` | none | https link template for a row, `{id}` is replaced by the row id |
+| `cname` | none | custom Pages domain, written as a `CNAME` file on the data branch |
 | `publish` | `true` | `false` writes `./cilytics-out` only (dry run) |
 
 Run the collector by hand with `GITHUB_TOKEN=... CILYTICS_ORG=name bun scripts/collect.mjs --out data.json` (set `CILYTICS_MAX_REPOS` to cap it). Preview a local snapshot with `site/index.html?data=./data.json&history=./history.json`.
