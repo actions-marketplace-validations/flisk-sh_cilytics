@@ -1,0 +1,90 @@
+name: Cilytics
+description: Hourly CI health for a GitHub org or user, published to a data branch of your own repository together with the page.
+author: flisk-sh
+branding:
+  icon: activity
+  color: green
+inputs:
+  org:
+    description: GitHub org or user to read. Defaults to the owner of the repository running the workflow.
+    required: false
+    default: ""
+  token:
+    description: Token that can read the public repos and push the data branch (the workflow's github.token with contents write is enough).
+    required: false
+    default: ${{ github.token }}
+  branch:
+    description: Branch that receives data.json, history.json and index.html, replaced as a single commit on every run.
+    required: false
+    default: cilytics-data
+  max-repos:
+    description: Read at most this many repos, most recently pushed first. Empty means all.
+    required: false
+    default: ""
+  scores-file:
+    description: Optional JSON array of scorer rows ({id, title, mode, unit, value, baseline, target, status, summary}) to show as the Scoreboard.
+    required: false
+    default: ""
+  scores-repo:
+    description: owner/repo the scores come from, shown next to the scoreboard.
+    required: false
+    default: ""
+  scores-url:
+    description: Optional https link template for a score row, with {id} replaced by the row id.
+    required: false
+    default: ""
+  publish:
+    description: Push the data branch. Set to "false" for a dry run that only writes ./cilytics-out.
+    required: false
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Previous history
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        mkdir -p cilytics-out
+        cd cilytics-out
+        git init -q
+        if git fetch --depth=1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH" 2>/dev/null; then
+          git show FETCH_HEAD:history.json > history.json 2>/dev/null || echo '[]' > history.json
+        else
+          echo '[]' > history.json
+        fi
+        rm -rf .git
+    - name: Collect
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        CILYTICS_ORG: ${{ inputs.org }}
+        CILYTICS_MAX_REPOS: ${{ inputs.max-repos }}
+        ACTION_PATH: ${{ github.action_path }}
+        SCORES_FILE: ${{ inputs.scores-file }}
+        SCORES_REPO: ${{ inputs.scores-repo }}
+        SCORES_URL: ${{ inputs.scores-url }}
+      run: |
+        args=(--out cilytics-out/data.json --history cilytics-out/history.json)
+        if [ -n "$SCORES_FILE" ]; then
+          args+=(--scores "$SCORES_FILE")
+          [ -n "$SCORES_REPO" ] && args+=(--scores-repo "$SCORES_REPO")
+          [ -n "$SCORES_URL" ] && args+=(--scores-url "$SCORES_URL")
+        fi
+        node "$ACTION_PATH/scripts/collect.mjs" "${args[@]}"
+        cp "$ACTION_PATH/site/index.html" "$ACTION_PATH/site/favicon.svg" "$ACTION_PATH/site/social.png" cilytics-out/
+    - name: Publish
+      if: inputs.publish == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        BRANCH: ${{ inputs.branch }}
+      run: |
+        cd cilytics-out
+        git init -q -b "$BRANCH"
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add data.json history.json index.html favicon.svg social.png
+        git commit -q -m "cilytics: $(date -u +%FT%TZ)"
+        git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
