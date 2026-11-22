@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { ACTIVE_DAYS, deliveryMetrics, HISTORY_MAX, LIVE_GUARDS, featuredRow, scanRepo, dailyCounts, findGelRun, gelFromRecord, isGelRun, median, percentile, repoEntry, sdlcFlags, summarizeRuns, totals, workflowStats } from "../site/scan.mjs";
+import { ACTIVE_DAYS, deliveryMetrics, HISTORY_MAX, LIVE_GUARDS, featuredRow, northStarFrom, scanRepo, dailyCounts, findGelRun, gelFromRecord, isGelRun, median, percentile, repoEntry, sdlcFlags, summarizeRuns, totals, workflowStats } from "../site/scan.mjs";
 
 export { deliveryMetrics, dailyCounts, findGelRun, gelFromRecord, isGelRun, median, percentile, sdlcFlags, summarizeRuns, totals, workflowStats };
 
@@ -72,6 +72,48 @@ async function fetchGelRecord(run, org) {
 	}
 }
 
+// A repo file's text through the contents API, or null when it (or the ref) is missing.
+async function repoText(full, path, ref) {
+	try {
+		const f = await gh(`/repos/${full}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`);
+		return Buffer.from(f.content ?? "", "base64").toString("utf8");
+	} catch {
+		return null;
+	}
+}
+
+// A repo file as parsed JSON, or null when it is missing or not JSON.
+async function repoJson(full, path, ref) {
+	try {
+		const t = await repoText(full, path, ref);
+		return t == null ? null : JSON.parse(t);
+	} catch {
+		return null;
+	}
+}
+
+// GEL's scheduled north-star workflow publishes each measurement to this branch (the result at its usual path, plus
+// history.jsonl with one line per run), because a bot cannot commit to a default branch that needs a reviewed PR.
+export const NS_BRANCH = "north-star";
+const measuredAt = (r) => { const t = Date.parse(r?.measuredAt); return Number.isNaN(t) ? -Infinity : t; };
+
+// The repo's north star: docs/gel.json (or a root gel.json) names it, its result file holds the number. GitHub only, no
+// checkout. A repo without a GEL config is skipped without an API call.
+export async function collectNorthStar(full, ref, rootNames, now, read = repoJson, readText = repoText) {
+	const path = rootNames.includes("docs") ? "docs/gel.json" : rootNames.includes("gel.json") ? "gel.json" : null;
+	let cfg = path ? await read(full, path, ref) : null;
+	if (!cfg && path === "docs/gel.json" && rootNames.includes("gel.json")) cfg = await read(full, "gel.json", ref);
+	const ns = cfg?.north_star;
+	if (!ns || typeof ns !== "object") return null;
+	const p = typeof ns.result === "string" && ns.result.trim() ? ns.result.trim().replace(/^\.\//, "") : null;
+	if (!p) return northStarFrom(cfg, null, now);
+	// the newer of the committed file and the one a run published (the committed one wins a tie), as GEL's guard judges it
+	const [committed, measured, history] = await Promise.all([read(full, p, ref), read(full, p, NS_BRANCH), readText(full, "history.jsonl", NS_BRANCH)]);
+	const result = measured && (!committed || measuredAt(measured) > measuredAt(committed)) ? measured : committed;
+	const runs = history ? history.split("\n").filter((l) => l.trim()).length : 0;
+	return northStarFrom(cfg, result, now, { runs });
+}
+
 async function collectGel(runs, org) {
 	const run = findGelRun(runs);
 	if (!run) return { installed: false };
@@ -106,7 +148,8 @@ export async function collect(now, org = resolveOrg(), maxRepos = Number(process
 			githubNames = (await gh(`/repos/${org}/${r.name}/contents/.github?ref=${encodeURIComponent(r.default_branch)}`)).map((f) => f.name);
 		} catch {}
 		const gel = await collectGel(runs, org);
-		repos.push(repoEntry({ repo: r, runs, openPRs: prs.length, rootNames, githubNames, gel, now, pulls }));
+		const northStar = await collectNorthStar(`${org}/${r.name}`, r.default_branch, rootNames, now);
+		repos.push(repoEntry({ repo: r, runs, openPRs: prs.length, rootNames, githubNames, gel, now, pulls, northStar }));
 	}
 	repos.sort((a, b) => b.red - a.red || (a.passRate ?? 101) - (b.passRate ?? 101) || a.name.localeCompare(b.name));
 	const skipped = all.length - active.length;
@@ -114,7 +157,7 @@ export async function collect(now, org = resolveOrg(), maxRepos = Number(process
 }
 
 // GEL's guards are plain modules with no imports, so they load from a pinned commit through a data: URL.
-const GEL_BASE = "https://raw.githubusercontent.com/flisk-sh/gel/414b5100876f01f96b8208ead5d2db9a11ec2545/";
+const GEL_BASE = "https://raw.githubusercontent.com/flisk-sh/gel/438cd8b5e2c9c72abc7482b6be948008f5d748d4/";
 async function loadGuards() {
 	const guards = {};
 	for (const n of LIVE_GUARDS) {
@@ -205,6 +248,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 			runs: t.runs,
 			flaky: t.flaky,
 			gelRepos: t.gelRepos,
+			northStars: t.northStars,
+			northStarsMet: t.northStarsMet,
 			mergedPerDay: data.delivery?.mergedPerDay ?? null,
 			firstPassRate: data.delivery?.firstPassRate ?? null,
 			changeFailureRate: data.delivery?.changeFailureRate ?? null,
